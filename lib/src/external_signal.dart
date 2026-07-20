@@ -62,12 +62,18 @@ abstract class ExternalSignalListener {
 }
 
 /// {@template cancellation_token}
-/// A read-only cancellation signal passed to [ExternalSignalListener.onAttach].
+/// A cancellation signal passed to [ExternalSignalListener.onAttach].
 ///
 /// Issued by [ExternalSignalRegistrar] when the owner detaches before
 /// attachment has completed. Implementations should check [isCancelled]
 /// or race against [signal] to abort expensive setup early and avoid
 /// committing resources that will immediately need to be released.
+///
+/// The token is also usable stand-alone, outside the registrar: any owner
+/// may construct one, hand it to cancellable work, and trip it via [cancel]
+/// when that work is superseded (e.g. a socket bind aborted by a later
+/// unbind). The consuming side stays read-only — it only reads [isCancelled]
+/// / awaits [signal]; the owner alone calls [cancel].
 ///
 /// Usage patterns:
 ///
@@ -102,7 +108,12 @@ class CancellationToken {
   /// ```
   Future<void> get signal => _completer.future;
 
-  void _cancel() {
+  /// Requests cancellation, completing [signal] and flipping [isCancelled].
+  ///
+  /// Idempotent — a second call is a no-op. Called by the owner
+  /// ([ExternalSignalRegistrar] on detach, or any stand-alone owner when
+  /// its cancellable work is superseded).
+  void cancel() {
     if (!_completer.isCompleted) _completer.complete();
   }
 }
@@ -191,7 +202,7 @@ class ExternalSignalRegistrar {
     _phase = _Phase.detaching;
     _detachCompleter = Completer<void>();
     for (final token in _tokens) {
-      token._cancel();
+      token.cancel();
     }
     unawaited(_runDetachWave());
   }
